@@ -1,0 +1,4 @@
+# Retroid Pocket 5: make the on-screen keyboard available by default.
+# phosh keeps resetting this to false, so it is also locked (see locks/00-osk).
+[org/gnome/desktop/a11y/applications]
+screen-keyboard-enabled=true

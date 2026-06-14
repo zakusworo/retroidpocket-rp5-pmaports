@@ -1,0 +1,10 @@
+[Unit]
+Description=Analog stick as mouse pointer (Retroid Pocket 5)
+
+[Service]
+ExecStart=/usr/bin/rp5-analog-mouse
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

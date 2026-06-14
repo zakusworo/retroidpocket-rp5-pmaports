@@ -1,0 +1,79 @@
+From: gmonsoon <greataji13@gmail.com>
+Date: Sat, 13 Jun 2026 02:30:00 +0700
+Subject: [PATCH] arm64: dts: qcom: sm8250-retroidpocket: add fan cooling-maps
+
+The pwm-fan driver sets the fan to maximum PWM at probe and, with no
+cooling-maps in any thermal zone, nothing ever lowers it again - the
+fan runs at 100% forever unless userspace intervenes.
+
+Add active trip points and cooling-maps to the skin-msm-thermal zone
+(pm8150l ADC-TM skin sensor) so the kernel thermal governor steps the
+fan through its cooling levels (0/32/64/128/255) automatically:
+38C -> 32, 43C -> 64, 48C -> 128, 53C -> 255, 3C hysteresis, plus a
+70C critical trip. No userspace fan daemon needed.
+
+Tested on Armbian (mainline 6.18) with the same device tree.
+---
+--- a/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-common.dtsi	2026-06-13 02:20:40.963031673 +0700
++++ b/arch/arm64/boot/dts/qcom/sm8250-retroidpocket-common.dtsi	2026-06-13 02:20:56.233369768 +0700
+@@ -86,10 +86,56 @@
+ 			thermal-sensors = <&pm8150l_adc_tm 0>;
+ 
+ 			trips {
+-				active-config0 {
+-					temperature = <50000>;
+-					hysteresis = <4000>;
+-					type = "passive";
++				skin_fan_lvl1: skin-fan-lvl1 {
++					temperature = <38000>;
++					hysteresis = <3000>;
++					type = "active";
++				};
++
++				skin_fan_lvl2: skin-fan-lvl2 {
++					temperature = <43000>;
++					hysteresis = <3000>;
++					type = "active";
++				};
++
++				skin_fan_lvl3: skin-fan-lvl3 {
++					temperature = <48000>;
++					hysteresis = <3000>;
++					type = "active";
++				};
++
++				skin_fan_lvl4: skin-fan-lvl4 {
++					temperature = <53000>;
++					hysteresis = <3000>;
++					type = "active";
++				};
++
++				skin-critical {
++					temperature = <70000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&skin_fan_lvl1>;
++					cooling-device = <&fan 1 1>;
++				};
++
++				map1 {
++					trip = <&skin_fan_lvl2>;
++					cooling-device = <&fan 2 2>;
++				};
++
++				map2 {
++					trip = <&skin_fan_lvl3>;
++					cooling-device = <&fan 3 3>;
++				};
++
++				map3 {
++					trip = <&skin_fan_lvl4>;
++					cooling-device = <&fan 4 4>;
+ 				};
+ 			};
+ 		};

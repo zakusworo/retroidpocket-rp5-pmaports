@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=RP5 Orientation
+Comment=Force the internal panel to upright landscape + 1.75 scale
+Exec=/usr/bin/rp5-orientation
+X-GNOME-Autostart-enabled=true
+Terminal=false

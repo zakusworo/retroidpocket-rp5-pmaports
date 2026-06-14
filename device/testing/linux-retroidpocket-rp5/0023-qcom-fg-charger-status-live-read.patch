@@ -1,0 +1,83 @@
+From: gmonsoon <greataji13@gmail.com>
+Date: Sat, 13 Jun 2026 23:45:00 +0700
+Subject: [PATCH] power: supply: qcom_fg: report charging status reliably
+
+The qcom_fg battery never reflected charging on the Retroid Pocket 5:
+pm8150b-charger reported online=1 status=Charging, but the battery
+power supply (the one UPower/phosh shows) reported "Discharging", so no
+charging indicator appeared.
+
+Two bugs:
+
+  1. The charger supply was looked up with
+     power_supply_get_by_name("power-supplies") -- i.e. a supply whose
+     *name* is literally "power-supplies". No such supply exists; the
+     intent was the "power-supplies" DT phandle (the node already has
+     power-supplies = <&pm8150b_charger>). The call always returned NULL,
+     leaving chg_psy NULL, so the battery permanently used current-sign
+     detection, which reports the wrong polarity here.
+
+  2. Even once resolved, chip->status is only refreshed by the charger's
+     power_supply_changed notifier and starts UNKNOWN, so a device booted
+     already plugged in would still fall back to the broken path.
+
+Resolve the charger from the DT phandle with power_supply_get_by_reference()
+and propagate -EPROBE_DEFER so the fuel gauge binds reliably regardless of
+probe order, and read the charger's status live in the STATUS handler
+instead of trusting the event-driven cache. The charger remains
+authoritative; current-based detection is only a last resort.
+
+--- a/drivers/power/supply/qcom_fg.c
++++ b/drivers/power/supply/qcom_fg.c
+@@ -886,12 +886,24 @@
+
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+-		/* Get status from charger if available */
+-		if (chip->chg_psy &&
+-			chip->status != POWER_SUPPLY_STATUS_UNKNOWN) {
+-			val->intval = chip->status;
+-			break;
+-		} else {
++		/*
++		 * Prefer the charger's status, read live. The cached
++		 * chip->status is only refreshed on charger notifications and
++		 * starts UNKNOWN, so a device booted already plugged in would
++		 * otherwise fall through to current-based detection and never
++		 * report charging.
++		 */
++		if (chip->chg_psy) {
++			union power_supply_propval pval;
++
++			if (!power_supply_get_property(chip->chg_psy,
++					POWER_SUPPLY_PROP_STATUS, &pval) &&
++			    pval.intval != POWER_SUPPLY_STATUS_UNKNOWN) {
++				val->intval = pval.intval;
++				break;
++			}
++		}
++		{
+ 			/*
+ 			 * Fall back to capacity and current-based
+ 			 * status checking
+@@ -1309,10 +1321,18 @@
+ 		return ret;
+ 	}
+
+-	/* Optional: Get charger power supply for status checking */
+-	chip->chg_psy = power_supply_get_by_name("power-supplies");
++	/*
++	 * Get the charger power supply for status checking. Resolve it from
++	 * the "power-supplies" DT phandle: power_supply_get_by_name() looked
++	 * up a supply literally named "power-supplies", which never exists, so
++	 * chg_psy was always NULL and the battery reported the wrong status.
++	 */
++	chip->chg_psy = power_supply_get_by_reference(dev_fwnode(chip->dev),
++						     "power-supplies");
+ 	if (IS_ERR(chip->chg_psy)) {
+ 		ret = PTR_ERR(chip->chg_psy);
++		if (ret == -EPROBE_DEFER)
++			return ret;
+ 		dev_warn(chip->dev, "Failed to get charger supply: %d\n", ret);
+ 		chip->chg_psy = NULL;
+ 	}

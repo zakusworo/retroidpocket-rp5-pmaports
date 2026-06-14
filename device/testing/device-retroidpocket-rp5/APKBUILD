@@ -1,0 +1,208 @@
+# Reference: <https://postmarketos.org/devicepkg>
+# Contributor: Alexey Andreyev <dev@aa13q.ru>
+pkgname=device-retroidpocket-rp5
+pkgdesc="Retroid Pocket 5"
+pkgver=1
+pkgrel=6
+url="https://postmarketos.org"
+license="MIT"
+arch="aarch64"
+# pmb:strict is required for grub
+options="!check !archcheck pmb:strict"
+depends="
+	postmarketos-base
+	systemd-boot
+"
+makedepends="
+	devicepkg-dev
+	dtc
+	grub
+	grub-efi
+"
+source="deviceinfo modules-initfs.mainline sm8250-retroidpocket-rp5-empty.dts
+	qcom-gpu-firmware.files
+	$pkgname.post-install
+	ucm/HiFi-RP.conf
+	ucm/RetroidPocket.conf
+	ucm/wsa881x-init.conf
+	99-retroid-gamepad.rules
+	fancontrol.sh
+	fancontrol.service
+	phoc.ini
+	rp5-orientation.sh
+	rp5-orientation.desktop
+	dconf-profile-user
+	dconf-osk
+	dconf-osk-lock
+	analog-mouse.py
+	analog-mouse.service
+	uinput-load.conf
+	$pkgname-phosh.post-install
+"
+install="$pkgname.post-install"
+# TODO: 	$pkgname-kernel-mainline:kernel_mainline
+subpackages="
+	$pkgname-kernel-downstream:kernel_downstream
+	$pkgname-nonfree-firmware:nonfree_firmware
+	$pkgname-phosh:phosh
+"
+
+build() {
+	devicepkg_build $startdir $pkgname
+	grub-mkimage \
+		--prefix="/grub" \
+		--output="$srcdir/bootaa64.efi" \
+		--format="arm64-efi" \
+		--compression="xz" \
+		\
+		all_video \
+		cat \
+		configfile \
+		disk \
+		echo \
+		efi_gop \
+		fat \
+		gzio \
+		help \
+		iso9660 \
+		linux \
+		ls \
+		normal \
+		part_gpt \
+		part_msdos \
+		search \
+		search_label \
+		test \
+		true
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+
+	# Grub / bootloader
+	install -Dm644 -t "$pkgdir"/boot/EFI/Boot \
+		"$srcdir"/bootaa64.efi
+
+	# Install post-install script
+	install -Dm755 "$srcdir"/$pkgname.post-install \
+		"$pkgdir"/usr/share/post-install/$pkgname.post-install
+
+	# ALSA UCM config (author: Teguh Sobirin <teguh@sobir.in>)
+	install -Dm644 -t "$pkgdir"/usr/share/alsa/ucm2/Qualcomm/sm8250 \
+		"$srcdir"/HiFi-RP.conf \
+		"$srcdir"/RetroidPocket.conf
+	install -Dm644 "$srcdir"/wsa881x-init.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/codecs/wsa881x/init.conf
+	mkdir -p "$pkgdir"/usr/share/alsa/ucm2/conf.d/sm8250
+	ln -s /usr/share/alsa/ucm2/Qualcomm/sm8250/RetroidPocket.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/conf.d/sm8250/retroidpocket-RetroidPocket5-.conf
+
+	# Gamepad udev rule (source: Batocera/ROCKNIX)
+	install -Dm644 "$srcdir"/99-retroid-gamepad.rules \
+		"$pkgdir"/usr/lib/udev/rules.d/99-retroid-gamepad.rules
+
+	# Fan control (source: JELOS/ROCKNIX)
+	install -Dm755 "$srcdir"/fancontrol.sh \
+		"$pkgdir"/usr/bin/fancontrol
+	install -Dm644 "$srcdir"/fancontrol.service \
+		"$pkgdir"/usr/lib/systemd/system/fancontrol.service
+}
+
+kernel_downstream() {
+	pkgdesc="Downstream kernel (recommended, close to mainline until not upstreamed)"
+	depends="linux-retroidpocket-rp5"
+	devicepkg_subpackage_kernel $startdir $pkgname $subpkgname
+}
+
+kernel_mainline() {
+	pkgdesc="Mainline kernel (not recommended yet)"
+	depends="linux-postmarketos-qcom-sm8250"
+
+	dtc -O dtb -o "$srcdir/dtbo.img" -I dts "$srcdir/sm8250-retroidpocket-rp5-empty.dts"
+	install -Dm644 "$srcdir/dtbo.img" "$subpkgdir/boot/dtbo.img"
+	devicepkg_subpackage_kernel $startdir $pkgname $subpkgname
+}
+
+nonfree_firmware() {
+	pkgdesc="GPU, Modem, DSP, WiFi, Bluetooth and other firmware"
+	depends="
+		firmware-qcom-adreno-a650
+		firmware-qcom-sm8250
+		linux-firmware-qcom
+		linux-firmware-ath11k
+		linux-firmware-rtl_nic
+		linux-firmware-qca
+		pd-mapper
+		tqftpserv
+	"
+	mkdir "$subpkgdir"
+
+	# Install mkinitfs hook to include GPU firmware in initramfs
+	install -Dm644 "$srcdir"/qcom-gpu-firmware.files \
+		"$subpkgdir"/etc/mkinitfs/files/qcom-gpu-firmware.files
+}
+
+phosh() {
+	install_if="$pkgname postmarketos-ui-phosh"
+	pkgdesc="Phosh tweaks for the Retroid Pocket 5 (orientation, scale, OSK, gamepad-as-mouse)"
+	depends="wlr-randr dconf py3-evdev"
+	install="$subpkgname.post-install"
+
+	# Compositor scale (rotation is handled by the wlr-randr autostart below
+	# because phoc.ini "rotate" is overridden by the DRM panel-orientation).
+	install -Dm644 "$srcdir"/phoc.ini "$subpkgdir"/etc/phosh/phoc.ini
+
+	# Orientation helper: force upright landscape (transform 90) + 1.75 scale.
+	install -Dm755 "$srcdir"/rp5-orientation.sh "$subpkgdir"/usr/bin/rp5-orientation
+
+	# Autostart it in the user session, the phrog greeter, and for new users.
+	install -Dm644 "$srcdir"/rp5-orientation.desktop \
+		"$subpkgdir"/etc/xdg/autostart/rp5-orientation.desktop
+	install -Dm644 "$srcdir"/rp5-orientation.desktop \
+		"$subpkgdir"/etc/phrog/autostart/rp5-orientation.desktop
+	install -Dm644 "$srcdir"/rp5-orientation.desktop \
+		"$subpkgdir"/etc/skel/.config/autostart/rp5-orientation.desktop
+
+	# Keep the on-screen keyboard available (phosh resets it) via a dconf lock.
+	install -Dm644 "$srcdir"/dconf-profile-user "$subpkgdir"/etc/dconf/profile/user
+	install -Dm644 "$srcdir"/dconf-osk "$subpkgdir"/etc/dconf/db/local.d/00-osk
+	install -Dm644 "$srcdir"/dconf-osk-lock \
+		"$subpkgdir"/etc/dconf/db/local.d/locks/00-osk
+
+	# Gamepad-as-mouse: phosh/Wayland ignores the gamepad for UI, so map the
+	# left analog stick to the pointer (A = left-click, B = right-click) via
+	# an evdev->uinput daemon. Needs the uinput module loaded at boot.
+	install -Dm755 "$srcdir"/analog-mouse.py "$subpkgdir"/usr/bin/rp5-analog-mouse
+	install -Dm644 "$srcdir"/analog-mouse.service \
+		"$subpkgdir"/usr/lib/systemd/system/analog-mouse.service
+	install -Dm644 "$srcdir"/uinput-load.conf \
+		"$subpkgdir"/usr/lib/modules-load.d/uinput.conf
+	# Statically enable the service (no systemctl at image-build time).
+	mkdir -p "$subpkgdir"/etc/systemd/system/multi-user.target.wants
+	ln -s /usr/lib/systemd/system/analog-mouse.service \
+		"$subpkgdir"/etc/systemd/system/multi-user.target.wants/analog-mouse.service
+}
+
+sha512sums="
+10585c8455cbc7ab2a4543859d4599504c4b92a8254835a4f19288b6d6fc8bf9bdce971e54a985423e6c1295953172813eedcd2ee6b3945a9e3b985b7dfa6d95  deviceinfo
+ddd5089e5fe0d54ab7d4431c42beb473c68025047f9c29e60da6177f825206dbeb51bdc3b5a2e11587796818d636ab446311a1ac7e217409261f6c2649ccba64  modules-initfs.mainline
+0bbb6d7a75c83c8655c91ae6d91d4655aa67a3143cc5efae86ee708329f142b8119834fc0496cfa4d1f12499723978fb912caff5b22377581c10ce9d8f7dc549  sm8250-retroidpocket-rp5-empty.dts
+5c845eaeb0df562e91287c0f8a1a5e92ce1a0cd4fdca19fbc14e35fb2ed978d008319edcbc68e98361f520462a3aabc8df0f6e206b5b66f6b16b5b9233cd100c  qcom-gpu-firmware.files
+2bc83c66708ee9035a05f359cacfa2db4883e32f6ffee9cc6dc850d5b29e576d89f662f1b7a48fe5c0966a18bbff94a1b9eb9e4a5bdcc45fff9f35b7f8751872  device-retroidpocket-rp5.post-install
+158b7fd1b7a50d14fc4abca32fc64a2aa408acc9e06fb35b985f6dd1dcbe1292c63e67d140291a9d0020fad13f6fa75ff17a796291609d9a302c942f4be7ec88  HiFi-RP.conf
+6e71e04566d11208c57b1c7382ce0cfce7d317f0ead44de79dc60c23eb870cd4df3819709b9693b7a25b41be7c12c8583918e034a411f7c397a1ff4bcf5c7caa  RetroidPocket.conf
+e32acd12e3b1bf9dcbcb161610535f366bb0f59c8d7ffe299c8b2e70d650d4cdfdd7f4bd08f9035d02aa8b5ab5ad6388fb5ebe6cf405695d72862b8836970b97  wsa881x-init.conf
+83bd69c200a8e6a5faa35207b99e9caee2fc39f96f68109585c6a8a00732c6b62131e1ed73a7745767f75095b56bc7c356d6b26ac3d3a1c49e10b5999253745c  99-retroid-gamepad.rules
+3b5695028afc5568ecb96caa73e3dc62002a22525ec3df7966dcef6034c9446506de71f84413cb81c451a8486150a521215f09bde45945dfeff5eb0396a32bcb  fancontrol.sh
+01950587c1950ed7fa92116f815423128ed8615c49d159a066dac7d00c2826af4bf6efe90cda84ea0470c6f1704251b967e7c8d5e5646738e6e7d3f311325f3a  fancontrol.service
+66728880dabe2128979dc6f48f32188c609c97cc0bad46329bfa30d884181aae04096341ff8462c957237ab25a74f203bb974bdb31f123d6f2751d841c4b7140  phoc.ini
+91536dc910ce8ad370c62cbb12fb38edc5236e384ca16a814feb14d9c4ed8f753de025fee7c72e4cd399b3db7fde4cc353efc7220b4a7def25381eda070d6aab  rp5-orientation.sh
+c575c82b094a8c4295d3f78b213f9e87ae26ecd598b5d653370bbb11eadcd078a81a533ce134b60cd137c1616ed60cd0a6c93a5648f320c374f0b7032614f8e6  rp5-orientation.desktop
+226ef29cced7271d503ae29580fa189994067aa174903844b1bcc619d1e33e6038e5d9d3dd6d502505fdb966489605227323cba37db2d5287b6317ad2d31480e  dconf-profile-user
+c5244163c1aae73cc2eb82d31e5777a0e44e7547d2134913c27bafbd184c8cd75c31c0d4447a5fc4010f3390d5d4ad18ffa8485962169452fc7c5cbc6073fa0b  dconf-osk
+531b1f3ac6d627307b2bc99461c5718c884908c29ed2d550c5b4538aff496f79ec401d5751fc4b35f1b38120d3461f0721ad0c944ce4d3ebc2b6b9df14a7926c  dconf-osk-lock
+47a3a1b0e8cd44aef72fa605b892da51109fec2924765d1f047ed9b22d4831cc063581a96065cb76f22f29eff6829aa65bc818ec87785eae1e7e51c5147791b6  analog-mouse.py
+9048cc2051a36f072c053388f92d713d86f0c9451bcd895cf02e13626b4b441cc0d96aeb296c81bc18e781cb89efe7171c9e98fc9ac890f1dacd142ef8991b53  analog-mouse.service
+a9b069ed121ffeee887e0583d8cb46035ecf1fa90a26a4ecb3aa11ff03178b2b08621f6676db6b2350f290694c04aabcf36f2ce3e0813a76dde9a33555edb112  uinput-load.conf
+63c8345894e57aee3b199996591af9d9c41f82a65983c459561a43f939e48eba85762d7444afaa92078e26c456347ee7d8779a73c18218c6d0572a32a0695f70  device-retroidpocket-rp5-phosh.post-install
+"

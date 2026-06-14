@@ -1,0 +1,39 @@
+From: gmonsoon <greataji13@gmail.com>
+Date: Sat, 13 Jun 2026 21:45:00 +0700
+Subject: [PATCH] power: supply: qcom_pm8150b_charger: detect online via power
+ path status
+
+The current online detection reads USBIN_INT_RT_STS (0x310 from the
+charger base) and checks USBIN_PLUGIN_RT_STS_BIT. On PM8150B this can
+fail to reflect an attached VBUS source, so UPower reports "on-battery"
+and phosh never shows a charging indicator even though the battery is
+charging.
+
+Use POWER_PATH_STATUS (0x10B from base) instead, matching the Google
+SM8150 BMS driver: online is true when USE_USBIN_BIT or USE_DCIN_BIT is
+set together with VALID_INPUT_POWER_SOURCE_STS_BIT.
+
+This only changes the userspace-visible POWER_SUPPLY_PROP_ONLINE report;
+hardware charging control is unaffected.
+
+--- a/drivers/power/supply/qcom_pm8150b_charger.c
++++ b/drivers/power/supply/qcom_pm8150b_charger.c
+@@ -324,14 +324,15 @@ static int smb5_get_prop_usb_online(struct smb5_chip *chip, int *val)
+ {
+ 	unsigned int stat;
+ 	int rc;
+
+-	rc = regmap_read(chip->regmap, chip->base + USBIN_INT_RT_STS_OFFSET, &stat);
++	rc = regmap_read(chip->regmap, chip->base + POWER_PATH_STATUS, &stat);
+ 	if (rc < 0) {
+-		dev_err(chip->dev, "Couldn't read USBIN_RT_STS rc=%d\n", rc);
++		dev_err(chip->dev, "Couldn't read POWER_PATH_STATUS rc=%d\n", rc);
+ 		return rc;
+ 	}
+
+-	*val = (stat & USBIN_PLUGIN_RT_STS_BIT) ? 1 : 0;
++	*val = !!(stat & (P_PATH_USE_USBIN_BIT | P_PATH_USE_DCIN_BIT)) &&
++	       !!(stat & P_PATH_VALID_INPUT_POWER_SOURCE_STS_BIT);
+ 	return 0;
+ }
+

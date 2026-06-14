@@ -1,0 +1,6 @@
+#!/bin/sh
+# Compile the dconf system database so the OSK key default + lock take effect.
+if command -v dconf >/dev/null 2>&1; then
+	dconf update 2>/dev/null || true
+fi
+exit 0
