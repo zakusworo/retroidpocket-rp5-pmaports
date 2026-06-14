@@ -1,4 +1,4 @@
-# postmarketOS port — Retroid Pocket 5 (`retroidpocket-rp5`)
+# postmarketOS port of Retroid Pocket 5 (`retroidpocket-rp5`)
 
 pmaports packages for the **Retroid Pocket 5** (Qualcomm SM8250 / Snapdragon 865),
 running postmarketOS with the **phosh** UI on a downstream-ish (near-mainline) kernel.
